@@ -8,7 +8,7 @@ agent_created: true
 
 ## Overview
 
-把「小红书博主经验 + 实时价格查询」整合成一份可执行的旅行攻略文档。核心能力是**免登录读取小红书笔记**（包括多图笔记：从 SSR 源码提取全部图片 URL 后逐张识别），配合搜索引擎做交通/住宿/签证价格验证，最后产出结构化 HTML。本 skill 也独立适用于「帮我读取/总结这几篇小红书笔记」类请求。
+把「小红书博主经验 + 实时价格查询」整合成一份可执行的旅行攻略文档。核心能力是**免登录读取小红书笔记**（包括多图笔记：从 SSR 源码提取全部图片 URL 后逐张识别），配合搜索引擎做交通/住宿/签证价格验证，最后产出结构化 HTML。进阶能力：**读取笔记评论**（博主没说但很有用的信息常藏在评论区——如「今天去人多吗」「这家店还在吗」「周一闭馆」，需要用户提供登录 cookie，见 Step 4 评论小节）。本 skill 也独立适用于「帮我读取/总结这几篇小红书笔记」类请求。
 
 ## 工作流决策树
 
@@ -73,10 +73,23 @@ agent_created: true
 
 原理、正则细节与故障排查见 `references/xhs-note-extraction.md`。
 
+### Step 4.5: 读取评论（可选，需登录 cookie）
+
+评论区常有博主没写的信息（实时人流量、店铺是否还在、临时避坑补充），值得抓取。**注意：评论接口必须登录态 cookie，无法匿名读取**：
+
+- **已实测结论**：`edith.xiaohongshu.com/api/sns/web/v2/comment/page` 需要 x-s/x-t/x-s-common 签名头 **且** 登录 cookie。无 cookie 时返回 `code -101「无登录信息，或登录信息为空」`；SSR 笔记页 HTML 里的评论字段是空占位（list 为空）。
+- **签名来源**：用 Playwright + 系统 Chrome 加载任意笔记页，等页面里的 `window._webmsxyw`（XHS 当前签名函数）就绪，抓取页面启动请求里的 `x-s-common`，再从页面内发起 API 请求（`credentials: 'include'`）。
+- **环境硬性要求**：评论接口对登录态校验很严。**机房/Cloudflare WARP/服务器 IP 环境会被风控识别**，即使拿到 cookie，也容易触发 `300011 当前账号存在异常`、随后 `web_session` 被吊销（`-100 登录已过期`）或直接被删除（`-101 无登录信息`）。因此脚本**必须在与账号匹配的家庭宽带/手机流量/办公室网络环境下运行**；若当前执行环境是机房 IP，只准备脚本/传文件，不要实际调用。
+- **cookie 获取方式**：请用户在自己已登录的浏览器里复制 cookie（DevTools → Application → Cookies → www.xiaohongshu.com，至少需要 `a1` + `web_session`，或整站 cookie），通过 `XHS_COOKIE` 环境变量或 `--cookie-file` 传入。`web_session` 是 Session cookie，关闭浏览器或触发风控后会失效，建议每次使用前现取。
+- **运行**：`python scripts/xhs_comments.py <笔记URL>...`（支持 txt 批量），输出到 `comments/<note_id>.md`（含昵称、点赞、正文、时间，楼中楼子评论缩进显示）。
+- 错误码速查：`-1` 签名失效；`-101` cookie 缺失/被删除；`-100` cookie 过期/吊销；`300011` 当前账号异常（IP/环境风控，立即停手换网络）。
+- 评论是「用户反馈」级别的信源，整合时标注「来自评论区」，与笔记正文、实时查询交叉验证；对「某店今天开门吗」「排队要多久」这类时效信息，评论时效往往好于正文。
+
 ## Step 5: 逐图识别 + 整合
 
 - 按笔记逐张 Read 图片，转写每张图的文字/评分/避坑点；用 TaskCreate 按笔记建任务，读完一张标记进度，避免漏图
 - 整理成结构化要点：景点推荐度/评分、美食清单、避坑点、预约/放票时间、交通细节、住宿建议
+- 若用户提供了登录 cookie：顺手跑 `scripts/xhs_comments.py` 抓评论，重点找评论区补充的时效信息（人流、排队、临时闭馆/闭店、价格变动），作为低优先级证据并入要点（标注「评论区」）
 - 与已有计划交叉验证：重复信息去重，冲突信息取多数来源，缺来源的信息标注「来源待确认」
 - 转写结束后清理临时 HTML 文件，保留 `xhs_imgs/` 供溯源
 
@@ -118,4 +131,5 @@ agent_created: true
 ## Resources
 
 - `scripts/xhs_fetch.py` — 免登录抓取小红书笔记全部图片（SSR 提取 + 批量下载）
-- `references/xhs-note-extraction.md` — SSR 提取原理、正则细节、代理/IP 风控排查表、已知限制
+- `scripts/xhs_comments.py` — 抓取笔记评论（Playwright 取 `_webmsxyw` 签名 + 用户登录 cookie，需先 `pip install playwright`）
+- `references/xhs-note-extraction.md` — SSR 提取原理、正则细节、代理/IP 风控排查表、评论接口实测结论、已知限制

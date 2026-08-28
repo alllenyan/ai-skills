@@ -53,3 +53,27 @@ IMAGE_RE = re.compile(
 - 只能读公开笔记（无需登录可见）；「仅关注可见」「仅粉丝可见」的内容读不到
 - 视频笔记只拿到封面图
 - 小红书若改版不再 SSR 渲染，此方法失效——届时回到浏览器自动化 + 真人扫码登录，且需真人 IP（家庭宽带）环境
+
+## 评论读取（实测结论 2026-08-28）
+
+**结论：评论接口必须登录 cookie，无法匿名读取。** 笔记正文/图片可以免登录（SSR 路线），评论不行。
+
+- SSR 页面 HTML 里的 `noteDetailMap/<id>/comments` 是空占位（`list: []`，`hasMore: true`），真实评论靠 API 拉取。
+- 接口：`GET https://edith.xiaohongshu.com/api/sns/web/v2/comment/page`，参数 `note_id, cursor, top_comment_id, image_formats=jpg,webp,avif, xsec_token`（还可带 `xsec_source`/`source`）。
+- 鉴权两件套：
+  1. **签名头** x-s / x-t / x-s-common —— 由页面 JS `window._webmsxyw` 生成。纯 Python 重写的旧版签名（md5 `"test"` 方案，`xhs` PyPI 0.2.13 内置）已失效，返回 `code -1`。
+  2. **登录 cookie** —— 至少 `a1` + `web_session`。无 cookie 时即使签名正确也返回 `code -101「无登录信息，或登录信息为空」`。
+- 可行方案（`scripts/xhs_comments.py`）：Playwright + 系统 Chrome 加载笔记页 → 等 `_webmsxyw` 就绪 → 注入 init script 抓页面启动请求的 `x-s-common` → 页面内 `fetch` 带 `credentials:'include'` + 签名头调评论 API → 按 `cursor` 翻页直到 `has_more=false`。
+- 错误码速查：
+  | code | 含义 | 处理 |
+  |---|---|---|
+  | -1 | 签名无效/格式错 | 换真实 `_webmsxyw` 签名（别用旧纯 Python 版） |
+  | -101 | 无登录信息 | 检查 cookie 是否被服务端删除；换网络环境或重新获取 cookie |
+  | -100 | 登录已过期 | 登录态已被风控吊销或 cookie 过期，需重新获取 |
+  | 300011 | 当前账号存在异常 | 当前 IP/设备环境被 XHS 风控标记，停止请求，换网络环境再试 |
+  | 200 + code 0 | 成功 | 解析 `data.comments` |
+- **环境限制（重要）**：评论接口不仅要求签名 + 登录 cookie，还要求 **IP/设备环境与账号匹配**。
+  - 机房/Cloudflare WARP/服务器 IP 环境：笔记页 SSR 能加载、`_webmsxyw` 能跑、签名能生成，但登录 cookie 一注入就可能被 XHS 风控识别为「异常登录」：先返回 `300011 当前账号存在异常`，随后 `web_session` 被服务端吊销（`-100 登录已过期`），甚至页面加载时就被删除（`document.cookie` 里找不到 `web_session`，调用 API 返回 `-101`）。
+  - 结论：**不要在机房/数据中心 IP 环境上调用评论脚本**。请在和用户账号相同或相近的家庭宽带/手机流量/办公室网络环境下运行。
+- 依赖：`pip install playwright` + 本机 Chrome（`channel="chrome"` 免下载浏览器内核）。
+- 时效提示：评论区比正文新，适合「店还在吗」「今天人多吗」「排队多久」类实时信息，但属低置信度信源，需与笔记正文、搜索交叉验证。
