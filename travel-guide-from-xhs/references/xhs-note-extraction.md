@@ -41,7 +41,8 @@ IMAGE_RE = re.compile(
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| HTML 很小、无 `__INITIAL_STATE__` | 被重定向到验证/登录页 | 换完整浏览器 UA 重试；确认 URL 完整带 `xsec_token` |
+| HTML 很小、无 `__INITIAL_STATE__`（约 34KB，title 为通用首页标题） | 两种可能：① `xsec_token` 过期（最常见，token 有时效，隔天的旧链接会失效）② IP 风控冷却中 | 先用新鲜链接验证（从 explore 首页 feed 提取带新 token 的链接）；若新鲜链接正常则是旧 token 过期，让用户重新分享链接；若新鲜链接也失败则是 IP 风控，等待冷却或换出口 IP |
+| 笔记页 302 重定向 | 同上，token 过期/风控 | 用 `curl -L` 跟随重定向看最终页面内容判断 |
 | 找到图片 URL 但下载 403 | 缺 Referer / 被 CDN 拦 | 加 `Referer: https://www.xiaohongshu.com/` |
 | 图片能下载但内容是 HTML | 出口 IP 被风控返回假图 | 走本地代理（`127.0.0.1:10808`）重试 |
 | 页面提示 "IP at risk" | 机房 IP 被识别 | 不要硬闯登录；SSR 提取路线通常不受影响 |
@@ -68,10 +69,11 @@ IMAGE_RE = re.compile(
 
 解析路径：`window.__INITIAL_STATE__` → `note.noteDetailMap[noteId].note.interactInfo`。注意数字是字符串，需 `int()` 转换。**筛选优先级**：收藏数 > 点赞数（收藏代表「可执行参考价值」，更符合攻略场景）。
 
-**找笔记的链接来源**（当前 IP 环境无法站内搜索——搜索 API 需登录返回 `-101`，搜索页浏览器打开直接被 300012 IP 风控重定向）：
+**找笔记的链接来源**（站内搜索的 IP 门槛比普通浏览高得多——2026-08-28 二次实测，换到新加坡 VPS 出口后：explore 首页 feed、笔记 SSR、CDN 图片全部正常，但搜索页仍 300012「IP存在风险」，换真 Edge 浏览器二进制也一样；手动重放搜索 API（x-s + x-t + x-s-common 齐全）返回「create invoker failed」）：
 1. 用户直接提供链接（最可靠）
 2. WebSearch 搜转载站（今日头条/腾讯/新浪转载文）——只能拿到内容，通常拿不到原帖链接，但可作为补充证据
-3. 换家庭宽带/手机流量环境后，可用浏览器搜索页或登录态搜索 API 直接搜
+3. **explore 首页 feed 免登录可读**（`https://www.xiaohongshu.com/explore` 返回 ~180KB SSR，含 80+ 条带新 `xsec_token` 的笔记链接 + likedCount），可用于取新鲜 token 验证环境，但内容是通用推荐流、无法按关键词筛选
+4. 换家庭宽带/手机流量（住宅/移动 IP）后，搜索页和登录态搜索 API 才可用——机房/VPN IP 即使能正常读笔记也会被搜索接口风控
   
 ## 评论读取（实测结论 2026-08-28）
 
