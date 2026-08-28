@@ -15,6 +15,8 @@ URL 里的斜杠被转义为 \\u002F，需先反转义再提取，然后带 Refe
 输出:
     DIR/note1.html, note2.html ...   (下载的页面源码，可溯源)
     DIR/xhs_imgs/note1_01.jpg ...    (全部图片)
+    抓取同时打印每篇笔记的收藏/点赞数（interactInfo，免登录），
+    便于按热度排序、优先读取高收藏笔记。
 
 抓完后用 Read 工具逐张读取 xhs_imgs/ 下的图片识别内容。
 """
@@ -22,6 +24,8 @@ URL 里的斜杠被转义为 \\u002F，需先反转义再提取，然后带 Refe
 import os
 import re
 import sys
+import json
+import time
 import argparse
 import urllib.request
 
@@ -42,6 +46,37 @@ def fetch_html(url):
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return resp.read().decode("utf-8", "ignore")
+
+
+def extract_interact_info(html):
+    """从 SSR 状态中提取 interactInfo（收藏/点赞/评论/分享数，字符串）。
+
+    路径：__INITIAL_STATE__ -> note.noteDetailMap[<id>].note.interactInfo
+    返回 dict 或 None。数字字段是字符串，调用方自行 int()。
+    """
+    try:
+        m = re.search(r"window\.__INITIAL_STATE__=(\{.*?\})\s*</script>", html, re.S)
+        if not m:
+            return None
+        # SSR JSON 里可能有 undefined 字面量，先替换再解析
+        raw = re.sub(r"(?<=[:,[])\s*undefined\s*(?=[,}\]])", "null", m.group(1))
+        obj = json.loads(raw)
+        detail_map = (obj.get("note") or {}).get("noteDetailMap") or {}
+        for note_id, detail in detail_map.items():
+            note = detail.get("note") or {}
+            inter = note.get("interactInfo")
+            if inter:
+                return {
+                    "note_id": note_id,
+                    "title": note.get("title", ""),
+                    "collected_count": int(inter.get("collectedCount") or 0),
+                    "liked_count": int(inter.get("likedCount") or 0),
+                    "comment_count": int(inter.get("commentCount") or 0),
+                    "share_count": int(inter.get("shareCount") or 0),
+                }
+    except Exception:
+        pass
+    return None
 
 
 def extract_image_urls(html):
@@ -88,6 +123,7 @@ def main():
         sys.exit(1)
 
     os.makedirs(os.path.join(args.out, "xhs_imgs"), exist_ok=True)
+    hot = []
     for idx, url in enumerate(url_list, 1):
         name = f"note{idx}"
         print(f"\n[{idx}/{len(url_list)}] {url[:70]}")
@@ -99,7 +135,6 @@ def main():
             print(f"  找到 {len(urls)} 张图片")
             if not urls:
                 print("  未找到图片：可能被拦到验证页、纯文字笔记或视频笔记")
-                continue
             for i, u in enumerate(urls, 1):
                 fn = os.path.join(args.out, "xhs_imgs", f"{name}_{i:02d}.jpg")
                 try:
@@ -107,8 +142,26 @@ def main():
                     print(f"    {name}_{i:02d}.jpg  {size} bytes")
                 except Exception as e:
                     print(f"    FAIL {name}_{i:02d}: {e}")
+            # 热度数据（免登录 SSR 自带）
+            info = extract_interact_info(html)
+            if info:
+                info["name"] = name
+                hot.append(info)
+                print(f"  热度: 收藏 {info['collected_count']} | 点赞 {info['liked_count']} | "
+                      f"评论 {info['comment_count']} | {info['title'][:40]}")
+            else:
+                print("  热度: 无法解析（页面可能是登录墙/SSR 未渲染）")
+            # 控制节奏，避免触发临时 IP 风控
+            if idx < len(url_list):
+                time.sleep(3)
         except Exception as e:
             print(f"  抓取失败: {e}")
+
+    if hot:
+        print("\n=== 按收藏数排序（攻略价值最高）===")
+        for h in sorted(hot, key=lambda x: x["collected_count"], reverse=True):
+            print(f"  收藏 {h['collected_count']:>6} | 赞 {h['liked_count']:>6} | {h['name']} | {h['title'][:40]}")
+        print("\n优先用 Read 逐张读取排序靠前笔记的图片。")
 
     print("\n完成。用 Read 工具逐张读取 xhs_imgs/ 下的图片。")
     print("若未抓到图片，参考 references/xhs-note-extraction.md 排查。")
