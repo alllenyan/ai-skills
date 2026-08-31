@@ -8,7 +8,7 @@ agent_created: true
 
 ## Overview
 
-把一个 CRM 业务域（线索、商机、报价、合同、订单、客户……）从"不懂"讲到"能独立输出一份可交付的模块咨询手册"的完整方法论。沉淀自 SAP CRM 实施顾问转型 CRM 咨询顾问的实战训练（线索模块完整走通，手册 15 节）。产出一份结构化的**模块咨询手册**（Markdown），同时用户全程获得方法论训练与咨询英语。
+把一个 CRM 业务域（线索、商机、报价、合同、订单、客户……）从"不懂"讲到"能独立输出一份可交付的模块咨询手册"的完整方法论。沉淀自 SAP CRM 实施顾问转型 CRM 咨询顾问的实战训练（线索模块完整走通，手册 15 节）。产出一份结构化的**模块咨询手册**（**Markdown + HTML 双格式**，固定交付组合），同时用户全程获得方法论训练与咨询英语。
 
 ## 使用场景与触发
 
@@ -82,6 +82,13 @@ agent_created: true
 - 按 `references/module-template.md` 的章节模板输出手册
 - **每个章节配 3-5 句咨询英语**（用户英语 A2-B1，目标是工作语言；要中文讲解 + 大量自然英文例句）
 - 手册每完成一节，用 present_files 展示，并提示用户"需要我补进文档吗"的沉淀习惯
+- **输出双格式（用户明确偏好的固定交付组合，不得省略）**：
+  1. md 落盘到 `deliverables/consulting/`（命名 `<模块>-module-consulting-handbook-<YYYY-MM-DD>.md`）
+  2. **立即**用 `references/md2html.py` 转出同目录 HTML（带侧边目录/斑马纹表格/返回顶部）
+     - 用法：`python3 references/md2html.py <源.md> [--title 标题] [--date 日期]`，不传 title/date 时自动从文件名推断（如 opportunity → 商机模块、lead → 线索模块、customer → 客户模块）
+     - 依赖 python-markdown，缺失时先 `python3 -m pip install markdown`
+  3. 校验 HTML 结构（tables/h2/正文关键词）后，用系统默认浏览器打开预览
+  - 若 present_files 不可用（宿主未挂载），用 `Invoke-Item`（PowerShell）/ `open` 打开浏览器版，并向用户说明右侧面板受限的原因
 
 ## 交互规范（与用户对话的方式）
 
@@ -110,5 +117,6 @@ agent_created: true
 
 - `references/module-template.md` — 模块咨询手册通用章节模板（16 节骨架 + 每节必答问题 + 表格骨架），剖析任意模块时按此组织输出
 - `references/core-methods.md` — 核心方法论库（正交思维/规则五要素/SLA 四要素/KPI 六维/回测校准/RACI 纪律/咨询金句），需要展开讲解时读取
+- `references/md2html.py` — **md → 咨询风 HTML 通用转换脚本**（深蓝侧边目录 + 斑马纹表格 + 返回顶部；自动推断中文标题/日期）。Step 8 双格式交付的固定工具，任何模块手册写完必须调用
 
-不需要 scripts 与 assets 目录——本技能是纯方法论技能。
+不需要 scripts 与 assets 目录——本技能是纯方法论技能，配套工具仅 `references/md2html.py` 一个脚本。
