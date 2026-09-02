@@ -1,0 +1,4 @@
+interface:
+  display_name: "CRM 业务域咨询专家"
+  short_description: "用六层框架生成任意 CRM 业务域的 Markdown 与 HTML 咨询交付物"
+  default_prompt: "使用 $crm-domain-consulting-expert 为一个 CRM 业务域生成结构化咨询文档，并同时交付 Markdown 与 HTML 预览版。"
